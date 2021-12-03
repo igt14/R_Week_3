@@ -1,0 +1,183 @@
+# Overview
+
+You are a Data analyst at Carrefour Kenya and are currently undertaking a project that will inform the marketing department on the most relevant marketing strategies that will result in the highest no. of sales (total price including tax)
+
+```{r}
+# Loading the data set
+ss1 <- read.csv("http://bit.ly/CarreFourDataset", row.names = 1)
+```
+
+```{r}
+# Checking for missing values
+colSums(is.na(ss1))
+
+# Checking for duplicates
+sum(duplicated(ss1))
+
+# Checking column types
+sapply(ss1, class)
+
+# Changing column types of categorical variables to factor
+ss1 <- transform(
+  ss1, 
+  Branch = as.factor(Branch),
+  Customer.type = as.factor(Customer.type),
+  Gender = as.factor(Gender),
+  Product.line = as.factor(Product.line),
+  Payment = as.factor(Payment)
+)
+```
+
+# Part 1 : Dimensionality reduction
+
+Since we have mixed data we use PCAmix library that performs principal component analysis of a set of individuals (observations) described by a mixture of qualitative and quantitative variables
+
+```{r}
+# Loading the libraries we will use
+library(PCAmixdata)
+```
+
+```{r}
+# Let's separate the qualitative variables from the quantitative ones
+
+num <- ss1[,c("Unit.price", "Quantity", "Tax", "cogs", "gross.income", "Rating")]
+
+cat <- ss1[, c("Branch", "Customer.type", "Gender", "Product.line", "Payment")]
+
+# Conducting PCA using only 2 components
+pca <- PCAmix(X.quanti = num, X.quali = cat, ndim = 2, graph = FALSE)
+```
+
+```{r}
+# Plotting PCA
+# First we save the pca coordinates as a data frame
+coord <- as.data.frame(pca$ind$coord)
+
+#
+plot(coord$`dim 1`, coord$`dim 2`, 
+     xlab = "PC1", 
+     ylab = "PC2",
+     col="#69b3a2")
+```
+
+# Part 2 : Feature selection
+
+```{r}
+# Since we are dealing with mixed data, we will first use a correlation filter on the continuous variables in determining feature importance
+weights1 <- linear.correlation(Total ~ Unit.price + Quantity + Tax + cogs + gross.margin.percentage + gross.income + Rating, ss1)
+print(weights1)
+```
+
+In determining total sales the most important continuous variables are Tax, cogs and gross.income
+Unit.Price and Quantity are not as important because they are accounted for in cogs since Unit.Price X Quantity = cogs
+
+```{r}
+# We then use an entropy based filter on the discrete variables in determining feature importance
+weights2 <- information.gain(Total ~ Branch + Customer.type + Gender + Product.line + Payment, ss1)
+print(weights2)
+```
+
+Product.line is the most important discrete feature followed by Branch.
+
+# Part 3: Association rules
+
+```{r}
+# Importing the libraries we will use
+library(arules)
+```
+
+```{r}
+# Loading our dataset
+ss2 <- read.transactions("http://bit.ly/SupermarketDatasetII", sep = ",")
+```
+
+```{r}
+# Previewing our first 5 transactions
+inspect(ss2[1:5])
+```
+
+```{r}
+# Summary of the transactions
+summary(ss2)
+```
+
+```{r}
+# Displaying top 10 most common items and the items whose support is at least 10%
+par(mfrow = c(1, 2))
+itemFrequencyPlot(ss2, topN = 10,col="darkgreen")
+itemFrequencyPlot(ss2, support = 0.1,col="darkred")
+```
+
+```{r}
+# Building a model based on association rules using the apriori function 
+# We use Min Support as 0.001 and confidence as 0.8
+rules <- apriori (ss2, parameter = list(supp = 0.001, conf = 0.8))
+summary(rules)
+```
+
+
+```{r}
+# Sorting the rules by lift in descending order
+rules<-sort(rules, by="lift", decreasing=TRUE)
+
+# Looking at the top 5 transactions
+inspect(rules[1:5])
+```
+The strongest association rule is that a customer who buys eggs, mineral water and pasta is going to buy shrimp
+
+# Part 4: Anomaly Detection
+
+```{r}
+# Importing the libraries we will use
+library(tidyverse)
+library(anomalize)
+library(tibbletime)
+library(ggplot2)
+library(lubridate)
+library(dplyr)
+```
+
+```{r}
+# Loading our data set
+# Since each date has multiple sale figures, we group by the date and create a new column for total sales per day
+ss3 <- read_csv("http://bit.ly/CarreFourSalesDataset") %>%
+  group_by(Date) %>%
+  summarise(total_sales = sum(Sales))
+```
+```{r}
+# Changing the date column type from character to date and sorting the dates correctly from the least recent to the most recent
+ss3 <- ss3 %>%
+  mutate(Date=as.Date(Date, format = "%m/%d/%Y")) %>%
+  as_tbl_time(Date) %>%
+  arrange(mdy(ss3$Date))
+```
+
+
+```{r}
+# Previewing the data set
+head(ss3)
+```
+
+```{r}
+# Plotting the sales over time
+ggplot(ss3, aes(x=Date, y=total_sales)) +
+  geom_line() + 
+  xlab("") +
+  ggtitle("Total sales over time")
+```
+
+```{r}
+# Anomaly detection with anomalize
+ss3_anomalized <- ss3 %>%
+  time_decompose(total_sales, merge = TRUE) %>%
+  anomalize(remainder) %>%
+  time_recompose()
+```
+
+```{r}
+# Plotting the anomalies
+ss3_anomalized %>%
+  plot_anomalies()
+```
+
+There are no anomalies.
